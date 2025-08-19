@@ -1,3 +1,4 @@
+
 import { GoogleGenAI } from "@google/genai";
 import type { HandlerEvent, HandlerContext } from "@netlify/functions";
 
@@ -56,7 +57,8 @@ const handler = async (event: HandlerEvent, context: HandlerContext) => {
         contents: [{ role: 'user', parts: [{ text: message }] }],
         config: {
             systemInstruction: SYSTEM_INSTRUCTION,
-            tools: [{googleSearch: {}}],
+            // Disable thinking to reduce latency on Netlify's free tier
+            thinkingConfig: { thinkingBudget: 0 },
         },
     });
 
@@ -68,12 +70,6 @@ const handler = async (event: HandlerEvent, context: HandlerContext) => {
             for await (const chunk of responseStream) {
               const chunkData = {
                 text: chunk.text,
-                sources: chunk.candidates?.[0]?.groundingMetadata?.groundingChunks?.map(
-                  (c: any) => ({
-                    title: c.web.title,
-                    uri: c.web.uri,
-                  })
-                ).filter((s: any) => s.title && s.uri),
               };
               const sseChunk = `data: ${JSON.stringify(chunkData)}\n\n`;
               controller.enqueue(encoder.encode(sseChunk));

@@ -93,19 +93,14 @@ async function streamFromGemini(
     contents: [{ role: 'user', parts: [{ text: message }] }],
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
-      tools: [{ googleSearch: {} }],
+      thinkingConfig: { thinkingBudget: 0 },
     },
   });
 
   for await (const chunk of responseStream) {
     const chunkData = {
       text: chunk.text,
-      sources: chunk.candidates?.[0]?.groundingMetadata?.groundingChunks?.map(
-        (c: any) => ({
-          title: c.web.title,
-          uri: c.web.uri,
-        })
-      ).filter((s: any) => s.title && s.uri),
+      sources: [],
     };
     onStream(chunkData);
   }
