@@ -1,3 +1,4 @@
+
 import { GoogleGenAI } from '@google/genai';
 
 const API_KEY_STORAGE_KEY = 'gemini_api_key';
@@ -21,7 +22,8 @@ const SYSTEM_INSTRUCTION = `You are 'Your Digital Assistant', a friendly and pat
 
 const isProduction = window.location.hostname.includes('netlify.app');
 
-async function streamFromNetlify(
+// This function now handles a single JSON response from Netlify, not a stream.
+async function callNetlifyFunction(
   message: string,
   onStream: (chunk: { text: string; sources?: any[] }) => void
 ) {
@@ -31,53 +33,19 @@ async function streamFromNetlify(
     body: JSON.stringify({ message }),
   });
 
+  const responseData = await response.json();
+
   if (!response.ok) {
-    let errorDetails = `שגיאה מהשרת (${response.status} ${response.statusText}).`;
-    try {
-      const errorText = await response.text();
-      if (errorText) {
-        try {
-          const errorData = JSON.parse(errorText);
-          errorDetails = errorData?.error?.message || errorText;
-        } catch (e) {
-          errorDetails = errorText;
-        }
-      }
-    } catch (e) {
-        // Failed to read error body, stick with the status code message.
-    }
-    throw new Error(errorDetails);
+    const errorMessage = responseData?.error?.message || `שגיאה מהשרת (${response.status})`;
+    throw new Error(errorMessage);
   }
 
-
-  if (!response.body) {
-    throw new Error("השרת החזיר תשובה ריקה.");
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    const textChunk = decoder.decode(value, { stream: true });
-    const lines = textChunk.split('\n\n').filter(line => line.startsWith('data: '));
-
-    for (const line of lines) {
-      try {
-        const jsonStr = line.replace('data: ', '');
-        if (jsonStr) {
-            const data = JSON.parse(jsonStr);
-            onStream(data);
-        }
-      } catch (e) {
-        console.error('Error parsing SSE chunk:', line, e);
-      }
-    }
-  }
+  // Call onStream once with the full text
+  onStream({ text: responseData.text });
 }
 
+
+// This function remains for local development, providing a streaming experience.
 async function streamFromGemini(
   message: string,
   onStream: (chunk: { text: string; sources?: any[] }) => void
@@ -112,7 +80,7 @@ export async function sendMessage(
 ): Promise<void> {
   try {
     if (isProduction) {
-      await streamFromNetlify(message, onStream);
+      await callNetlifyFunction(message, onStream);
     } else {
       await streamFromGemini(message, onStream);
     }
@@ -124,7 +92,7 @@ export async function sendMessage(
         errorMessage = "מפתח ה-API שהוזן אינו תקין. יש לפתוח את ההגדרות, למחוק את המפתח השגוי ולהזין מפתח תקין.";
         localStorage.removeItem(API_KEY_STORAGE_KEY);
       } else {
-        // This will now correctly display the detailed error from streamFromNetlify
+        // This will now correctly display the detailed error from the function
         errorMessage = error.message;
       }
     }

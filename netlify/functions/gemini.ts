@@ -52,7 +52,8 @@ const handler = async (event: HandlerEvent, context: HandlerContext) => {
       };
     }
 
-    const responseStream = await ai.models.generateContentStream({
+    // Use generateContent for a simple, non-streaming response
+    const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: [{ role: 'user', parts: [{ text: message }] }],
         config: {
@@ -62,40 +63,14 @@ const handler = async (event: HandlerEvent, context: HandlerContext) => {
         },
     });
 
-    // Netlify Functions stream response
-    const stream = new ReadableStream({
-      async start(controller) {
-        const encoder = new TextEncoder();
-        try {
-            for await (const chunk of responseStream) {
-              const chunkData = {
-                text: chunk.text,
-              };
-              const sseChunk = `data: ${JSON.stringify(chunkData)}\n\n`;
-              controller.enqueue(encoder.encode(sseChunk));
-            }
-        } catch (streamError) {
-            console.error("Error while processing Gemini stream:", streamError);
-            const errorChunk = { text: "אירעה שגיאה במהלך קבלת התשובה." };
-            const sseErrorChunk = `data: ${JSON.stringify(errorChunk)}\n\n`;
-            controller.enqueue(encoder.encode(sseErrorChunk));
-        } finally {
-            controller.close();
-        }
-      }
-    });
-
-     return new Response(stream, {
-        headers: {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
-        status: 200
-    });
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: response.text }),
+    };
 
   } catch (error) {
-    console.error("Error in Netlify function setup:", error);
+    console.error("Error in Netlify function:", error);
     const errorMessage = error instanceof Error ? error.message : "Internal Server Error";
     return {
       statusCode: 500,
