@@ -1,10 +1,11 @@
 import React from 'react';
-import { DownloadIcon, DocumentTextIcon, TableCellsIcon, HomeIcon, CogIcon, UploadIcon } from './icons';
+import { DownloadIcon, DocumentTextIcon, TableCellsIcon, HomeIcon, CogIcon, UploadIcon, TrashIcon } from './icons';
 
 interface HeaderProps {
   onSaveJson: () => void;
   onImportJson: () => void;
   onExportTs: () => void;
+  onImportTs: () => void;
   onExportCsv: () => void;
   onNewChat: () => void;
   onSavePdf: () => void;
@@ -13,6 +14,7 @@ interface HeaderProps {
   isChatActive: boolean;
   isEditing: boolean;
   onToggleEdit: () => void;
+  onResetCategories: () => void;
   className?: string;
 }
 
@@ -20,6 +22,7 @@ const Header: React.FC<HeaderProps> = ({
     onSaveJson,
     onImportJson,
     onExportTs,
+    onImportTs,
     onExportCsv,
     onNewChat,
     onSavePdf,
@@ -28,6 +31,7 @@ const Header: React.FC<HeaderProps> = ({
     isChatActive,
     isEditing,
     onToggleEdit,
+    onResetCategories,
     className
 }) => {
   const buttonBaseClass = "flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg transition-colors";
@@ -59,6 +63,60 @@ const Header: React.FC<HeaderProps> = ({
         >
           {isEditing ? 'סיים עריכה' : 'עריכה'}
         </button>
+
+        {isEditing && (
+            <>
+                <button
+                    onClick={onResetCategories}
+                    title="איפוס קטגוריות לברירת מחדל"
+                    className={`${buttonBaseClass} bg-red-50 text-red-600 hover:bg-red-100 border border-red-200`}
+                >
+                    <TrashIcon className="w-5 h-5" />
+                    <span>איפוס</span>
+                </button>
+                <button
+                    onClick={onImportJson}
+                    title="טען מבנה קטגוריות מקובץ JSON"
+                    className={`${buttonBaseClass} ${enabledClass}`}
+                    >
+                    <UploadIcon className="w-5 h-5" />
+                    <span>יבא JSON</span>
+                </button>
+                <button
+                    onClick={onSaveJson}
+                    title="גבה את מבנה הקטגוריות לקובץ JSON"
+                    className={`${buttonBaseClass} ${enabledClass}`}
+                    >
+                    <DownloadIcon className="w-5 h-5" />
+                    <span>יצא JSON</span>
+                </button>
+                <button
+                    onClick={onImportTs}
+                    title="טען מבנה קטגוריות מקובץ TS"
+                    className={`${buttonBaseClass} ${enabledClass}`}
+                    >
+                    <UploadIcon className="w-5 h-5" />
+                    <span>יבא TS</span>
+                </button>
+                <button
+                    onClick={onExportTs}
+                    title="גבה את מבנה הקטגוריות לקובץ familyData.ts"
+                    className={`${buttonBaseClass} ${enabledClass}`}
+                    >
+                    <DocumentTextIcon className="w-5 h-5" />
+                    <span>יצא TS</span>
+                </button>
+                <button
+                    onClick={onExportCsv}
+                    title="גבה את מבנה הקטגוריות לקובץ CSV"
+                    className={`${buttonBaseClass} ${enabledClass}`}
+                    >
+                    <TableCellsIcon className="w-5 h-5" />
+                    <span>יצא CSV</span>
+                </button>
+            </>
+        )}
+
         {isChatActive && (
           <>
             <button
@@ -89,38 +147,6 @@ const Header: React.FC<HeaderProps> = ({
             </button>
           </>
         )}
-        <button
-          onClick={onImportJson}
-          title="טען מבנה קטגוריות מקובץ JSON"
-          className={`${buttonBaseClass} ${enabledClass}`}
-        >
-          <UploadIcon className="w-5 h-5" />
-          <span>יבא JSON</span>
-        </button>
-        <button
-          onClick={onSaveJson}
-          title="גבה את מבנה הקטגוריות לקובץ JSON"
-          className={`${buttonBaseClass} ${enabledClass}`}
-        >
-          <DownloadIcon className="w-5 h-5" />
-          <span>יצא JSON</span>
-        </button>
-        <button
-          onClick={onExportTs}
-          title="גבה את מבנה הקטגוריות לקובץ familyData.ts"
-          className={`${buttonBaseClass} ${enabledClass}`}
-        >
-          <DocumentTextIcon className="w-5 h-5" />
-          <span>יצא TS</span>
-        </button>
-        <button
-          onClick={onExportCsv}
-          title="גבה את מבנה הקטגוריות לקובץ CSV"
-          className={`${buttonBaseClass} ${enabledClass}`}
-        >
-          <TableCellsIcon className="w-5 h-5" />
-          <span>יצא CSV</span>
-        </button>
       </div>
     </header>
   );

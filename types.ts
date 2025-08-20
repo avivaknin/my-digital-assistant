@@ -1,3 +1,4 @@
+
 import React from 'react';
 
 export interface ChatMessage {
@@ -15,13 +16,19 @@ export interface ColorClasses {
   hoverBorder: string;
 }
 
-export interface SubCategory {
+export interface QuestionItem {
+  id: string;
   text: string;
-  question?: string; 
-  questions?: string[];
+}
+
+export interface SubCategory {
+  id: string;
+  text: string;
+  questions: QuestionItem[];
 }
 
 export interface MainCategory {
+  id: string;
   text: string;
   icon: React.ReactNode;
   subCategories: SubCategory[];

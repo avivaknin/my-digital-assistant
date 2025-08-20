@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import type { ChatMessage, MainCategory, SubCategory, ColorClasses } from './types';
+import type { ChatMessage, MainCategory, SubCategory, ColorClasses, QuestionItem } from './types';
 import { sendMessage } from './services/geminiService';
 import Header from './components/Header';
 import CategoryButton from './components/CategoryButton';
@@ -7,19 +7,21 @@ import ListButton from './components/ListButton';
 import ChatMessageComponent from './components/ChatMessage';
 import ChatInput from './components/ChatInput';
 import SettingsModal from './components/SettingsModal';
+import PasswordPrompt from './components/PasswordPrompt';
 import { 
-    ArrowRightIcon, PlusIcon, PencilIcon, TrashIcon, HeartIcon, BankIcon, PhoneIcon, MapIcon, TvIcon, CameraIcon, ShieldIcon, GlobeIcon, BookOpenIcon, WrenchScrewdriverIcon 
+    ArrowRightIcon, PlusIcon, PencilIcon, TrashIcon, HeartIcon, BankIcon, PhoneIcon, MapIcon, TvIcon, CameraIcon, ShieldIcon, GlobeIcon, BookOpenIcon, WrenchScrewdriverIcon, MonitorIcon
 } from './components/icons';
-import { mainCategories as initialCategories } from './data/categoriesData';
+import { getInitialCategories, generateId } from './data/categoriesData';
 
 declare const html2canvas: any;
 declare const jspdf: any;
 
 const CHAT_STORAGE_KEY = 'digitalAssistantChatHistory';
 const API_KEY_STORAGE_KEY = 'gemini_api_key';
+const CATEGORIES_STORAGE_KEY = 'digitalAssistantCategories';
 
 const iconMap: { [key: string]: React.FC<{className?: string}> } = {
-  HeartIcon, BankIcon, PhoneIcon, MapIcon, TvIcon, CameraIcon, ShieldIcon, GlobeIcon, BookOpenIcon, WrenchScrewdriverIcon, PlusIcon
+  HeartIcon, BankIcon, PhoneIcon, MapIcon, TvIcon, CameraIcon, ShieldIcon, GlobeIcon, BookOpenIcon, WrenchScrewdriverIcon, MonitorIcon, PlusIcon
 };
 
 const App: React.FC = () => {
@@ -28,7 +30,6 @@ const App: React.FC = () => {
       const savedMessagesJSON = localStorage.getItem(CHAT_STORAGE_KEY);
       if (!savedMessagesJSON) return [];
       const savedMessages = JSON.parse(savedMessagesJSON) as ChatMessage[];
-      // Ensure no messages are stuck in a streaming state on load
       return savedMessages.map(msg => ({ ...msg, isStreaming: false }));
     } catch (error) {
       console.error("Could not load messages from localStorage", error);
@@ -41,12 +42,35 @@ const App: React.FC = () => {
   const [apiKey, setApiKey] = useState<string | null>(() => localStorage.getItem(API_KEY_STORAGE_KEY));
   const [selectedCategory, setSelectedCategory] = useState<MainCategory | null>(null);
   const [selectedSubCategory, setSelectedSubCategory] = useState<SubCategory | null>(null);
-  const [categories, setCategories] = useState<MainCategory[]>(initialCategories);
-  const [isEditing, setIsEditing] = useState(false);
+  const [categories, setCategories] = useState<MainCategory[]>(() => {
+    try {
+      const savedCategoriesJSON = localStorage.getItem(CATEGORIES_STORAGE_KEY);
+      if (!savedCategoriesJSON) return getInitialCategories();
+
+      const parsedData = JSON.parse(savedCategoriesJSON);
+      if (!Array.isArray(parsedData)) return getInitialCategories();
+
+      const rehydratedCategories = parsedData.map((cat: any): MainCategory => {
+        if (!cat.id || !cat.text || !cat.subCategories) {
+          throw new Error('Invalid category structure in localStorage.');
+        }
+        return {
+          ...cat,
+          icon: cat.icon && iconMap[cat.icon.__iconName]
+            ? React.createElement(iconMap[cat.icon.__iconName], cat.icon.props)
+            : React.createElement(PlusIcon, { className: "w-12 h-12" }),
+        };
+      });
+      return rehydratedCategories;
+    } catch (error) {
+      console.error("Could not load categories from localStorage", error);
+      return getInitialCategories();
+    }
+  });
+  const [editMode, setEditMode] = useState<'off' | 'prompt' | 'on'>('off');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // On first load, check if API key is missing in local development
     const isLocal = !window.location.hostname.includes('netlify.app');
     if (isLocal && !apiKey) {
       setIsSettingsOpen(true);
@@ -61,7 +85,6 @@ const App: React.FC = () => {
     scrollToBottom();
   }, [messages]);
 
-  // Save messages to localStorage whenever they change
   useEffect(() => {
     try {
       if (messages.length > 0) {
@@ -73,6 +96,44 @@ const App: React.FC = () => {
       console.error("Could not save messages to localStorage", error);
     }
   }, [messages]);
+
+  useEffect(() => {
+    try {
+        const replacer = (key: string, value: any) => {
+            if (key === 'icon' && value && value.type && value.type.name) {
+                return { __iconName: value.type.name, props: value.props };
+            }
+            return value;
+        };
+        const categoriesJson = JSON.stringify(categories, replacer);
+        localStorage.setItem(CATEGORIES_STORAGE_KEY, categoriesJson);
+    } catch (error) {
+        console.error("Could not save categories to localStorage", error);
+    }
+  }, [categories]);
+
+  useEffect(() => {
+    if (selectedCategory) {
+        const freshCategory = categories.find(c => c.id === selectedCategory.id);
+        if (!freshCategory) {
+            setSelectedCategory(null);
+            setSelectedSubCategory(null);
+        } else {
+            if (freshCategory !== selectedCategory) {
+                setSelectedCategory(freshCategory);
+            }
+            if (selectedSubCategory) {
+                const freshSubCategory = freshCategory.subCategories.find(s => s.id === selectedSubCategory.id);
+                if (!freshSubCategory) {
+                    setSelectedSubCategory(null);
+                } else if (freshSubCategory !== selectedSubCategory) {
+                    setSelectedSubCategory(freshSubCategory);
+                }
+            }
+        }
+    }
+  }, [categories, selectedCategory, selectedSubCategory]);
+
 
   const handleSendMessage = useCallback(async (text: string, isExpansion = false) => {
     const userMessage: ChatMessage = {
@@ -121,11 +182,7 @@ const App: React.FC = () => {
   }, [handleSendMessage]);
   
   const handleSubCategoryClick = (subCat: SubCategory) => {
-    if (subCat.questions) {
-      setSelectedSubCategory(subCat);
-    } else if (subCat.question) {
-      handleSendMessage(subCat.question);
-    }
+    setSelectedSubCategory(subCat);
   };
 
   const handleSaveApiKey = (newKey: string) => {
@@ -135,80 +192,152 @@ const App: React.FC = () => {
     alert('המפתח נשמר בהצלחה!');
   };
 
-  // --- Edit Mode Handlers ---
+  // --- Edit Mode Logic ---
+
+  const handleToggleEdit = () => {
+    if (editMode === 'on') {
+        setEditMode('off');
+    } else {
+        setEditMode('prompt');
+    }
+  };
+
+  const handlePasswordSubmit = (password: string) => {
+      if (password === '2024') {
+          setEditMode('on');
+      } else {
+          alert('סיסמה שגויה.');
+          setEditMode('off');
+      }
+  };
+
+  const handleCancelPassword = () => {
+    setEditMode('off');
+  };
 
   const handleAdd = (type: 'main' | 'sub' | 'question') => {
     const text = prompt(`הכנס את הטקסט עבור ${type === 'main' ? 'הקטגוריה הראשית' : type === 'sub' ? 'תת הקטגוריה' : 'השאלה'} החדשה:`);
     if (!text) return;
 
-    if (type === 'main') {
-        const newCategory: MainCategory = {
-            text,
-            icon: React.createElement(PlusIcon, { className: "w-12 h-12" }),
-            colorClasses: { bg: 'bg-gray-50', border: 'border-gray-200', text: 'text-gray-500', hoverBorder: 'hover:border-gray-400' },
-            subCategories: []
-        };
-        setCategories(prev => [...prev, newCategory]);
-    } else if (type === 'sub' && selectedCategory) {
-        const newSubCategory: SubCategory = { text, questions: [] };
-        const newCategories = categories.map(cat => cat === selectedCategory ? { ...cat, subCategories: [...cat.subCategories, newSubCategory] } : cat);
-        setCategories(newCategories);
-        setSelectedCategory(newCategories.find(c => c.text === selectedCategory.text) || null);
-    } else if (type === 'question' && selectedCategory && selectedSubCategory) {
-        const newCategories = categories.map(cat => cat === selectedCategory ? {
-            ...cat,
-            subCategories: cat.subCategories.map(sub => sub === selectedSubCategory ? { ...sub, questions: [...(sub.questions || []), text] } : sub)
-        } : cat);
-        setCategories(newCategories);
-        const updatedMain = newCategories.find(c => c.text === selectedCategory.text);
-        const updatedSub = updatedMain?.subCategories.find(s => s.text === selectedSubCategory.text);
-        setSelectedCategory(updatedMain || null);
-        setSelectedSubCategory(updatedSub || null);
-    }
+    setCategories(prev => {
+        if (type === 'main') {
+            const newCategory: MainCategory = {
+                id: generateId(),
+                text,
+                icon: React.createElement(PlusIcon, { className: "w-12 h-12" }),
+                colorClasses: { bg: 'bg-gray-50', border: 'border-gray-200', text: 'text-gray-500', hoverBorder: 'hover:border-gray-400' },
+                subCategories: []
+            };
+            return [...prev, newCategory];
+        } 
+        if (type === 'sub' && selectedCategory) {
+            const newSubCategory: SubCategory = { id: generateId(), text, questions: [] };
+            return prev.map(cat => 
+                cat.id === selectedCategory.id
+                ? { ...cat, subCategories: [...cat.subCategories, newSubCategory] } 
+                : cat
+            );
+        } 
+        if (type === 'question' && selectedCategory && selectedSubCategory) {
+            const newQuestion: QuestionItem = { id: generateId(), text };
+            return prev.map(cat => 
+                cat.id === selectedCategory.id ? {
+                    ...cat,
+                    subCategories: cat.subCategories.map(sub => 
+                        sub.id === selectedSubCategory.id 
+                        ? { ...sub, questions: [...sub.questions, newQuestion] } 
+                        : sub)
+                } : cat
+            );
+        }
+        return prev;
+    });
   };
 
-  const handleEdit = (type: 'main' | 'sub' | 'question', mainIndex: number, subIndex?: number, qIndex?: number) => {
-    const currentText = type === 'main' ? categories[mainIndex].text : type === 'sub' ? categories[mainIndex].subCategories[subIndex!].text : categories[mainIndex].subCategories[subIndex!].questions![qIndex!];
+  const handleEdit = (type: 'main' | 'sub' | 'question', id: string, currentText: string) => {
     const newText = prompt('ערוך את הטקסט:', currentText);
     if (!newText || newText === currentText) return;
-
-    const newCategories = [...categories];
-    if (type === 'main') {
-        newCategories[mainIndex].text = newText;
-    } else if (type === 'sub') {
-        newCategories[mainIndex].subCategories[subIndex!].text = newText;
-    } else if (type === 'question') {
-        newCategories[mainIndex].subCategories[subIndex!].questions![qIndex!] = newText;
-    }
-    setCategories(newCategories);
-  };
-
-  const handleDelete = (type: 'main' | 'sub' | 'question', mainIndex: number, subIndex?: number, qIndex?: number) => {
-    if (!confirm('האם אתה בטוח שברצונך למחוק?')) return;
-    
-    let newCategories = [...categories];
-    if (type === 'main') {
-        newCategories.splice(mainIndex, 1);
-    } else if (type === 'sub') {
-        newCategories[mainIndex].subCategories.splice(subIndex!, 1);
-    } else if (type === 'question') {
-        newCategories[mainIndex].subCategories[subIndex!].questions!.splice(qIndex!, 1);
-    }
-    setCategories(newCategories);
+  
+    setCategories(prev => {
+      return prev.map(mainCat => {
+        if (type === 'main' && mainCat.id === id) {
+          return { ...mainCat, text: newText };
+        }
+        if (type === 'sub' || type === 'question') {
+          return {
+            ...mainCat,
+            subCategories: mainCat.subCategories.map(subCat => {
+              if (type === 'sub' && subCat.id === id) {
+                return { ...subCat, text: newText };
+              }
+              if (type === 'question') {
+                return {
+                  ...subCat,
+                  questions: subCat.questions.map(q => q.id === id ? { ...q, text: newText } : q),
+                };
+              }
+              return subCat;
+            }),
+          };
+        }
+        return mainCat;
+      });
+    });
   };
   
-  const EditableWrapper: React.FC<{ children: React.ReactNode; onEdit: () => void; onDelete: () => void; }> = ({ children, onEdit, onDelete }) => (
-    <div className="relative group w-full h-full">
-        {children}
-        <div className="absolute top-1 left-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button onClick={onEdit} className="p-1.5 bg-blue-100 text-blue-600 rounded-full hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500"><PencilIcon className="w-4 h-4" /></button>
-            <button onClick={onDelete} className="p-1.5 bg-red-100 text-red-600 rounded-full hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-red-500"><TrashIcon className="w-4 h-4" /></button>
-        </div>
-    </div>
-  );
+  const handleDelete = (type: 'main' | 'sub' | 'question', id: string) => {
+    if (!confirm('האם אתה בטוח שברצונך למחוק?')) return;
+  
+    setCategories(prev => {
+      if (type === 'main') {
+        return prev.filter(cat => cat.id !== id);
+      }
+      return prev.map(mainCat => {
+        if (type === 'sub') {
+          return {
+            ...mainCat,
+            subCategories: mainCat.subCategories.filter(sub => sub.id !== id),
+          };
+        }
+        if (type === 'question') {
+          return {
+            ...mainCat,
+            subCategories: mainCat.subCategories.map(sub => ({
+              ...sub,
+              questions: sub.questions.filter(q => q.id !== id),
+            })),
+          };
+        }
+        return mainCat;
+      });
+    });
+  };
 
+  // --- Export/Import Handlers ---
 
-  // --- Export Handlers ---
+  const processImportedCategories = (parsedData: any[]): MainCategory[] => {
+    if (!Array.isArray(parsedData)) {
+      throw new Error('המבנה הבסיסי של הקובץ צריך להיות מערך (array).');
+    }
+
+    return parsedData.map((cat: any): MainCategory => {
+      if (!cat.text || !cat.subCategories) {
+        throw new Error('לכל קטגוריה ראשית חייב להיות שדה "text" ו-"subCategories".');
+      }
+      return {
+        ...cat,
+        id: cat.id || generateId(),
+        subCategories: (cat.subCategories || []).map((sub: any) => ({
+          ...sub,
+          id: sub.id || generateId(),
+          questions: (sub.questions || []).map((q: any) => typeof q === 'string' ? { id: generateId(), text: q } : { ...q, id: q.id || generateId() })
+        })),
+        icon: cat.icon && iconMap[cat.icon.__iconName]
+          ? React.createElement(iconMap[cat.icon.__iconName], cat.icon.props)
+          : React.createElement(PlusIcon, { className: "w-12 h-12" }),
+      };
+    });
+  };
   
   const handleImportJson = () => {
     const input = document.createElement('input');
@@ -225,22 +354,7 @@ const App: React.FC = () => {
                 if (!jsonContent) throw new Error("הקובץ ריק.");
                 
                 const parsedData = JSON.parse(jsonContent);
-
-                if (!Array.isArray(parsedData)) {
-                    throw new Error('המבנה הבסיסי של הקובץ צריך להיות מערך (array).');
-                }
-
-                const rehydratedCategories = parsedData.map((cat: any): MainCategory => {
-                    if (!cat.text || !cat.subCategories) {
-                        throw new Error('לכל קטגוריה ראשית חייב להיות שדה "text" ו-"subCategories".');
-                    }
-                    return {
-                        ...cat,
-                        icon: cat.icon && iconMap[cat.icon.__iconName]
-                            ? React.createElement(iconMap[cat.icon.__iconName], cat.icon.props)
-                            : React.createElement(PlusIcon, { className: "w-12 h-12" }),
-                    };
-                });
+                const rehydratedCategories = processImportedCategories(parsedData);
 
                 setCategories(rehydratedCategories);
                 setSelectedCategory(null);
@@ -256,6 +370,55 @@ const App: React.FC = () => {
             alert('שגיאה בקריאת הקובץ.');
         };
         reader.readAsText(file);
+    };
+    input.click();
+  };
+
+  const handleImportTs = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.ts';
+    input.onchange = (e) => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const tsContent = event.target?.result as string;
+                if (!tsContent) throw new Error("הקובץ ריק.");
+
+                const assignment = 'const rehydratedCategories = ';
+                const startIndex = tsContent.indexOf(assignment);
+                if (startIndex === -1) {
+                    throw new Error("פורמט קובץ TS לא תקין. לא נמצא המשתנה 'rehydratedCategories'.");
+                }
+
+                const jsonStartIndex = startIndex + assignment.length;
+                const endIndex = tsContent.indexOf(';', jsonStartIndex);
+                if (endIndex === -1) {
+                    throw new Error("פורמט קובץ TS לא תקין. חסר ';' בסוף הצהרת המשתנה.");
+                }
+
+                const jsonString = tsContent.substring(jsonStartIndex, endIndex);
+                
+                const parsedData = JSON.parse(jsonString);
+                const rehydratedCategories = processImportedCategories(parsedData);
+
+                setCategories(rehydratedCategories);
+                setSelectedCategory(null);
+                setSelectedSubCategory(null);
+                alert('הקטגוריות יובאו בהצלחה מקובץ TS!');
+
+            } catch (error) {
+                console.error("Error importing TS file:", error);
+                alert(`שגיאה בייבוא קובץ ה-TS: ${error instanceof Error ? error.message : 'שגיאה לא ידועה'}`);
+            }
+        };
+        reader.onerror = () => {
+            alert('שגיאה בקריאת הקובץ.');
+        };
+        reader.readAsText(file, 'UTF-8');
     };
     input.click();
   };
@@ -286,6 +449,7 @@ import type { MainCategory } from '../types';
 import {
   HeartIcon, BankIcon, PhoneIcon, MapIcon, TvIcon, CameraIcon, ShieldIcon, GlobeIcon, BookOpenIcon, WrenchScrewdriverIcon, PlusIcon
 } from '../components/icons';
+import { generateId } from './categoriesData'; // Assuming generateId is exported
 
 const iconMap: { [key: string]: React.FC<{className?: string}> } = {
   HeartIcon, BankIcon, PhoneIcon, MapIcon, TvIcon, CameraIcon, ShieldIcon, GlobeIcon, BookOpenIcon, WrenchScrewdriverIcon, PlusIcon
@@ -298,7 +462,7 @@ const rehydratedCategories = ${JSON.stringify(categories, (key, value) => {
     return value;
 }, 2)};
 
-export const mainCategories: MainCategory[] = rehydratedCategories.map((cat: any) => ({
+export const getInitialCategories = (): MainCategory[] => rehydratedCategories.map((cat: any) => ({
     ...cat,
     icon: cat.icon && iconMap[cat.icon.__iconName] 
         ? React.createElement(iconMap[cat.icon.__iconName], cat.icon.props) 
@@ -321,9 +485,9 @@ export const mainCategories: MainCategory[] = rehydratedCategories.map((cat: any
     
     categories.forEach(mainCat => {
         (mainCat.subCategories || []).forEach(subCat => {
-            const questions = subCat.questions || (subCat.question ? [subCat.question] : []);
+            const questions = subCat.questions || [];
             questions.forEach(q => {
-                rows.push([mainCat.text, subCat.text, q]);
+                rows.push([mainCat.text, subCat.text, q.text]);
             });
         });
     });
@@ -350,6 +514,14 @@ export const mainCategories: MainCategory[] = rehydratedCategories.map((cat: any
     setMessages([]);
     setSelectedCategory(null);
     setSelectedSubCategory(null);
+  };
+
+  const handleResetCategories = () => {
+    if (window.confirm('האם את/ה בטוח/ה שברצונך לאפס את כל הקטגוריות לברירת המחדל? כל השינויים שביצעת יימחקו.')) {
+        setCategories(getInitialCategories());
+        setSelectedCategory(null);
+        setSelectedSubCategory(null);
+    }
   };
 
   const handleSavePdf = async () => {
@@ -406,6 +578,7 @@ export const mainCategories: MainCategory[] = rehydratedCategories.map((cat: any
   };
 
   const renderContent = () => {
+    const isEditing = editMode === 'on';
     if (messages.length > 0) {
       return (
         <div className="flex-grow">
@@ -418,9 +591,6 @@ export const mainCategories: MainCategory[] = rehydratedCategories.map((cat: any
     }
 
     if (selectedCategory && selectedSubCategory) {
-        const mainIndex = categories.findIndex(c => c === selectedCategory);
-        const subIndex = selectedCategory.subCategories.findIndex(s => s === selectedSubCategory);
-
         return (
             <div className="flex flex-col items-center">
                 <button
@@ -434,15 +604,17 @@ export const mainCategories: MainCategory[] = rehydratedCategories.map((cat: any
               <h2 className="text-2xl font-semibold text-gray-700 mb-2">{selectedCategory.text}</h2>
               <h3 className="text-xl text-gray-600 mb-6">{selectedSubCategory.text}</h3>
               <div className="w-full max-w-2xl mx-auto grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {selectedSubCategory.questions?.map((question, qIndex) => {
-                    const button = <ListButton
-                        key={question}
-                        text={question}
-                        onClick={() => handleSendMessage(question)}
+                {selectedSubCategory.questions?.map((question) => (
+                    <ListButton
+                        key={question.id}
+                        text={question.text}
+                        onClick={() => handleSendMessage(question.text)}
                         colorClasses={selectedCategory.colorClasses}
-                    />;
-                    return isEditing ? <EditableWrapper key={question+qIndex} onEdit={() => handleEdit('question', mainIndex, subIndex, qIndex)} onDelete={() => handleDelete('question', mainIndex, subIndex, qIndex)}>{button}</EditableWrapper> : button;
-                })}
+                        isEditing={isEditing}
+                        onEdit={() => handleEdit('question', question.id, question.text)}
+                        onDelete={() => handleDelete('question', question.id)}
+                    />
+                ))}
                 {isEditing && (
                   <div className="sm:col-span-2">
                     <ListButton text="הוסף שאלה חדשה" icon={<PlusIcon className="w-6 h-6" />} onClick={() => handleAdd('question')} colorClasses={{ bg: 'bg-gray-100', border: 'border-gray-300', text: 'text-gray-500', hoverBorder: 'hover:border-gray-400' }} />
@@ -454,7 +626,6 @@ export const mainCategories: MainCategory[] = rehydratedCategories.map((cat: any
     }
 
     if (selectedCategory) {
-        const mainIndex = categories.findIndex(c => c === selectedCategory);
         return (
             <div className="flex flex-col items-center">
                 <button
@@ -467,15 +638,17 @@ export const mainCategories: MainCategory[] = rehydratedCategories.map((cat: any
                 </button>
                 <h2 className="text-2xl font-semibold text-gray-700 mb-6">{selectedCategory.text}</h2>
                 <div className="w-full max-w-2xl mx-auto grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {selectedCategory.subCategories.map((subCat, subIndex) => {
-                    const button = <ListButton
-                        key={subCat.text}
+                {selectedCategory.subCategories.map((subCat) => (
+                    <ListButton
+                        key={subCat.id}
                         text={subCat.text}
                         onClick={() => handleSubCategoryClick(subCat)}
                         colorClasses={selectedCategory.colorClasses}
-                    />;
-                    return isEditing ? <EditableWrapper key={subCat.text+subIndex} onEdit={() => handleEdit('sub', mainIndex, subIndex)} onDelete={() => handleDelete('sub', mainIndex, subIndex)}>{button}</EditableWrapper> : button;
-                })}
+                        isEditing={isEditing}
+                        onEdit={() => handleEdit('sub', subCat.id, subCat.text)}
+                        onDelete={() => handleDelete('sub', subCat.id)}
+                    />
+                ))}
                  {isEditing && (
                   <div className="sm:col-span-2">
                     <ListButton text="הוסף תת-קטגוריה" icon={<PlusIcon className="w-6 h-6" />} onClick={() => handleAdd('sub')} colorClasses={{ bg: 'bg-gray-100', border: 'border-gray-300', text: 'text-gray-500', hoverBorder: 'hover:border-gray-400' }} />
@@ -490,16 +663,18 @@ export const mainCategories: MainCategory[] = rehydratedCategories.map((cat: any
         <>
             <h2 className="text-2xl font-semibold text-gray-700 mb-6 text-center">במה אוכל לעזור היום?</h2>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {categories.map((cat, index) => {
-                const button = <CategoryButton
-                    key={cat.text}
+            {categories.map((cat) => (
+                <CategoryButton
+                    key={cat.id}
                     icon={cat.icon}
                     text={cat.text}
                     onClick={() => setSelectedCategory(cat)}
                     colorClasses={cat.colorClasses}
-                />;
-                return isEditing ? <EditableWrapper key={cat.text+index} onEdit={() => handleEdit('main', index)} onDelete={() => handleDelete('main', index)}>{button}</EditableWrapper> : button;
-            })}
+                    isEditing={isEditing}
+                    onEdit={() => handleEdit('main', cat.id, cat.text)}
+                    onDelete={() => handleDelete('main', cat.id)}
+                />
+            ))}
             {isEditing && <CategoryButton text="הוסף קטגוריה חדשה" icon={<PlusIcon className="w-10 h-10" />} onClick={() => handleAdd('main')} colorClasses={{ bg: 'bg-gray-100', border: 'border-gray-300', text: 'text-gray-500', hoverBorder: 'hover:border-gray-400' }} />}
             </div>
         </>
@@ -515,14 +690,16 @@ export const mainCategories: MainCategory[] = rehydratedCategories.map((cat: any
           onSaveJson={handleSaveJson}
           onImportJson={handleImportJson}
           onExportTs={handleExportTs}
+          onImportTs={handleImportTs}
           onExportCsv={handleExportCsv}
           onNewChat={handleNewChat}
           onSavePdf={handleSavePdf}
           onOpenSettings={() => setIsSettingsOpen(true)}
           isSavingPdf={isSavingPdf}
           isChatActive={messages.length > 0}
-          isEditing={isEditing}
-          onToggleEdit={() => setIsEditing(!isEditing)}
+          isEditing={editMode === 'on'}
+          onToggleEdit={handleToggleEdit}
+          onResetCategories={handleResetCategories}
         />
         <main className="flex-grow p-4 overflow-y-auto flex flex-col">
           <div className="p-4" id="chat-content-area">
@@ -538,6 +715,12 @@ export const mainCategories: MainCategory[] = rehydratedCategories.map((cat: any
             onSave={handleSaveApiKey}
             currentApiKey={apiKey}
         />
+        {editMode === 'prompt' && (
+            <PasswordPrompt 
+                onSubmit={handlePasswordSubmit} 
+                onCancel={handleCancelPassword} 
+            />
+        )}
       </div>
     </div>
   );
